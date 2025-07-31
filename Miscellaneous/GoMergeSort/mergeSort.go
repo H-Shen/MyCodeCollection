@@ -1,69 +1,80 @@
 package main
 
-import "sync"
-
-const (
-	THRESHOLD = 1024
-	ROUTINE   = 1
+import (
+    "sync"
 )
 
-func merge(s []int, mid int) {
-	temp := make([]int, len(s))
-	l := 0
-	r := mid
-	k := 0
-	for l < mid && r < len(s) {
-		if s[l] < s[r] {
-			temp[k] = s[l]
-			l++
-		} else {
-			temp[k] = s[r]
-			r++
-		}
-		k++
-	}
-	for l < mid {
-		temp[k] = s[l]
-		l++
-		k++
-	}
-	for r < len(s) {
-		temp[k] = s[r]
-		r++
-		k++
-	}
-	// copy back to s
-	for i := 0; i < len(s); i++ {
-		s[i] = temp[i]
-	}
+const threshold = 1024 // below this size, switch to sequential
+
+// ParallelMergeSort sorts s in place, using up to two goroutines
+// per split and a single auxiliary buffer.
+func ParallelMergeSort(s []int) {
+    buf := make([]int, len(s))
+    parallelSort(s, buf)
 }
 
-func seqMergesort(s []int) {
-	if len(s) <= 1 {
-		return
-	}
-	mid := len(s) >> 1
-	seqMergesort(s[:mid])
-	seqMergesort(s[mid:])
-	merge(s, mid)
+// SequentialMergeSort sorts s in place using only the current goroutine.
+func SequentialMergeSort(s []int) {
+    buf := make([]int, len(s))
+    seqSort(s, buf)
 }
 
-func parMergesort(s []int) {
-	if len(s) <= 1 {
-		return
-	}
-	if len(s) <= THRESHOLD {
-		seqMergesort(s)
-	} else {
-		mid := len(s) >> 1
-		var wg sync.WaitGroup
-		wg.Add(ROUTINE)
-		go func() {
-			defer wg.Done()
-			parMergesort(s[:mid])
-		}()
-		parMergesort(s[mid:])
-		wg.Wait()
-		merge(s, mid)
-	}
+func parallelSort(s, buf []int) {
+    n := len(s)
+    if n <= 1 {
+        return
+    }
+    if n <= threshold {
+        seqSort(s, buf)
+        return
+    }
+
+    mid := n / 2
+    var wg sync.WaitGroup
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        parallelSort(s[:mid], buf[:mid])
+    }()
+    parallelSort(s[mid:], buf[mid:])
+    wg.Wait()
+
+    merge(s, buf, mid)
+}
+
+func seqSort(s, buf []int) {
+    n := len(s)
+    if n <= 1 {
+        return
+    }
+
+    mid := n / 2
+    seqSort(s[:mid], buf[:mid])
+    seqSort(s[mid:], buf[mid:])
+    merge(s, buf, mid)
+}
+
+// merge assumes s[:mid] and s[mid:] are each sorted.
+// It writes the merged result into buf, then copies it back to s.
+func merge(s, buf []int, mid int) {
+    i, j, k := 0, mid, 0
+    n := len(s)
+
+    // merge into buf
+    for i < mid && j < n {
+        if s[i] <= s[j] {
+            buf[k] = s[i]
+            i++
+        } else {
+            buf[k] = s[j]
+            j++
+        }
+        k++
+    }
+    // copy any leftovers
+    copy(buf[k:], s[i:mid])
+    copy(buf[k+(mid-i):], s[j:])
+
+    // write back
+    copy(s, buf[:n])
 }
