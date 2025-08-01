@@ -1,80 +1,74 @@
-package main
+package example
 
-import (
-    "sync"
+import "sync"
+
+const (
+	THRESHOLD = 1024
+	ROUTINE   = 1
 )
 
-const threshold = 1024 // below this size, switch to sequential
-
-// ParallelMergeSort sorts s in place, using up to two goroutines
-// per split and a single auxiliary buffer.
-func ParallelMergeSort(s []int) {
-    buf := make([]int, len(s))
-    parallelSort(s, buf)
+// ParMergesort sorts s in place using a parallel merge‐sort.
+func ParMergesort(s []int) {
+	parMergesort(s)
 }
 
-// SequentialMergeSort sorts s in place using only the current goroutine.
-func SequentialMergeSort(s []int) {
-    buf := make([]int, len(s))
-    seqSort(s, buf)
+// SeqMergesort sorts s in place using a sequential merge‐sort.
+func SeqMergesort(s []int) {
+	seqMergesort(s)
 }
 
-func parallelSort(s, buf []int) {
-    n := len(s)
-    if n <= 1 {
-        return
-    }
-    if n <= threshold {
-        seqSort(s, buf)
-        return
-    }
-
-    mid := n / 2
-    var wg sync.WaitGroup
-    wg.Add(1)
-    go func() {
-        defer wg.Done()
-        parallelSort(s[:mid], buf[:mid])
-    }()
-    parallelSort(s[mid:], buf[mid:])
-    wg.Wait()
-
-    merge(s, buf, mid)
+func merge(s []int, mid int) {
+	temp := make([]int, len(s))
+	l, r, k := 0, mid, 0
+	for l < mid && r < len(s) {
+		if s[l] < s[r] {
+			temp[k] = s[l]
+			l++
+		} else {
+			temp[k] = s[r]
+			r++
+		}
+		k++
+	}
+	for l < mid {
+		temp[k] = s[l]
+		l++
+		k++
+	}
+	for r < len(s) {
+		temp[k] = s[r]
+		r++
+		k++
+	}
+	copy(s, temp)
 }
 
-func seqSort(s, buf []int) {
-    n := len(s)
-    if n <= 1 {
-        return
-    }
-
-    mid := n / 2
-    seqSort(s[:mid], buf[:mid])
-    seqSort(s[mid:], buf[mid:])
-    merge(s, buf, mid)
+func seqMergesort(s []int) {
+	if len(s) <= 1 {
+		return
+	}
+	mid := len(s) >> 1
+	seqMergesort(s[:mid])
+	seqMergesort(s[mid:])
+	merge(s, mid)
 }
 
-// merge assumes s[:mid] and s[mid:] are each sorted.
-// It writes the merged result into buf, then copies it back to s.
-func merge(s, buf []int, mid int) {
-    i, j, k := 0, mid, 0
-    n := len(s)
-
-    // merge into buf
-    for i < mid && j < n {
-        if s[i] <= s[j] {
-            buf[k] = s[i]
-            i++
-        } else {
-            buf[k] = s[j]
-            j++
-        }
-        k++
-    }
-    // copy any leftovers
-    copy(buf[k:], s[i:mid])
-    copy(buf[k+(mid-i):], s[j:])
-
-    // write back
-    copy(s, buf[:n])
+func parMergesort(s []int) {
+	if len(s) <= 1 {
+		return
+	}
+	if len(s) <= THRESHOLD {
+		seqMergesort(s)
+	} else {
+		mid := len(s) >> 1
+		var wg sync.WaitGroup
+		wg.Add(ROUTINE)
+		go func() {
+			defer wg.Done()
+			parMergesort(s[:mid])
+		}()
+		parMergesort(s[mid:])
+		wg.Wait()
+		merge(s, mid)
+	}
 }
