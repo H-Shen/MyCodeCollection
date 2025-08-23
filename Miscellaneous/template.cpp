@@ -1135,12 +1135,12 @@ int LevenshteinDistance(const string &a, const string &b) {
 }
 
 // Generate the prime table from 1 to MAXN
-// Usage: Sieve primes from 1 to 1005: EulerPrimeSieve::init();
-// Usage: Check if N is a prime: !EulerPrimeSieve::isNotPrime[N];
-// Usage: Check the kth prime: EulerPrimeSieve::prime[k - 1];
+// Usage: Sieve primes from 1 to 1005: LinearPrimeSieve::init();
+// Usage: Check if N is a prime: !LinearPrimeSieve::isNotPrime[N];
+// Usage: Check the kth prime: LinearPrimeSieve::prime[k - 1];
 //
 // Reduce num_prime to the number of primes if the space is not enough.
-namespace EulerPrimeSieve {
+namespace LinearPrimeSieve {
 
     const int MAXN = 1005;
     int prime[MAXN] = {0};
