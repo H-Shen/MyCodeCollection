@@ -1981,40 +1981,46 @@ vector<int> sum_of_factors(int n) {
 }
 
 // using Log2 = __lg2
+template<typename F>
 struct SparseTable {
-    vector<vector<ll> > spt;
-    vector<ll> Log2;
-    int n, logn;
-    explicit SparseTable(int n) : n(n) {
-        Log2.resize(n + 5);
-        Log2.at(1) = 0;
-        Log2.at(2) = 1;
-        for (int i = 3; i < n + 5; ++i)
-            Log2.at(i) = Log2.at(i >> 1) + 1;
-        logn = floor(log2(n) + 2);
-        spt.resize(n + 5, vector<ll>(logn));
+    int n, maxLog;
+    vector<int> Log2;
+    vector<vector<ll>> spt;
+    F op;
+    SparseTable(int _n, F _op): n(_n), op(_op) {
+        Log2.assign(n+1, 0);
+        for (int i = 2; i <= n; ++i) Log2[i] = Log2[i/2] + 1;
+        maxLog = Log2[n];
+        spt.assign(n+1, vector<ll>(maxLog+1));
     }
     void input() {
-        for (int i = 1; i <= n; ++i) {
-            cin >> spt.at(i).at(0);
-        }
+        for (int i = 1; i <= n; ++i) cin >> spt[i][0];
     }
-    // 也可以求区间和 区间或 区间gcd/lcm 区间最小 
-    // 只需修改spt.at(i).at(j - 1)和spt.at(i + (1 << (j - 1))).at(j - 1)的二元运算符即可
     void init() {
-        for (int j = 1; j <= logn; ++j) {
-            for (int i = 1; i + (1 << j) - 1 <= n; ++i) {
-                spt.at(i).at(j) = max(spt.at(i).at(j - 1),
-                                      spt.at(i + (1 << (j - 1))).at(j - 1));
-            }
-        }
+        for (int j = 1; j <= maxLog; ++j)
+            for (int i = 1; i + (1 << j) - 1 <= n; ++i)
+                spt[i][j] = op(spt[i][j-1], spt[i + (1 << (j-1))][j-1]);
     }
-    ll query(int l, int r) {
-        int s = Log2.at(r - l + 1);
-        ll ans = max(spt.at(l).at(s), spt.at(r - (1 << s) + 1).at(s));
-        return ans;
+    ll query(int l, int r) const {
+        int k = Log2[r - l + 1];
+        return op(spt[l][k], spt[r - (1 << k) + 1][k]);
     }
 };
+
+//void SparseTableUsage() {
+//    int n, m;
+//    cin >> n >> m;
+//    auto g = [](ll a, ll b){ return gcd(a, b); };
+//    SparseTable<decltype(g)> st(n, g);
+//    st.input();
+//    st.init();
+//    while (m--) {
+//        int l, r;
+//        cin >> l >> r;
+//        cout << st.query(l, r) << "\n";
+//    }
+//    return 0;
+//}
 
 // Preprocess takes O(nmlog(n)log(m))
 // Query index starts from 1
