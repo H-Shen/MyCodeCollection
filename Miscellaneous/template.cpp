@@ -111,6 +111,45 @@ namespace IO {
     }
 }
 
+/**
+ * A function that compares two integers as strings in three-way style.
+ * @return -1 if lhs < rhs, 0 if lhs == rhs, 1 if lhs > rhs
+ */
+inline static
+int threeWayIntComparator(const std::string &lhs, const std::string &rhs) {
+    // Case 1: lhs < 0 and rhs >= 0
+    if (lhs.front() == '-' && rhs.front() != '-')
+        return -1;
+    // Case 2: lhs >= 0 and rhs < 0
+    if (lhs.front() != '-' && rhs.front() == '-')
+        return 1;
+    // Case 3: lhs < 0 and rhs < 0
+    if (lhs.front() == '-' && rhs.front() == '-') {
+        return threeWayComparator(std::string(rhs, 1), std::string(lhs, 1));
+    }
+
+    // Case 4: lhs >= 0 and rhs >= 0
+    // Sub-case 1: lhs = rhs
+    if (lhs == rhs)
+        return 0;
+    // Sub-case 2-1: lhs != rhs and length(lhs) > length(rhs)
+    if (lhs.size() > rhs.size())
+        return 1;
+    // Sub-case 2-2: lhs != rhs and length(lhs) < length(rhs)
+    if (lhs.size() < rhs.size())
+        return -1;
+    // Sub-case 2-3: lhs != rhs and length(lhs) == length(rhs)
+    for (size_t i = 0; i != lhs.size(); i++) {
+        if (lhs.at(i) == rhs.at(i))
+            continue;
+        if (lhs.at(i) > rhs.at(i))
+            return 1;
+        else
+            return -1;
+    }
+    return 0;
+}
+
 // DSU: Union_Find_Set
 // Complexity: O (a(n)) per operation. Note: O (log n) if one of
 // union-by-size or path compression is omitted
