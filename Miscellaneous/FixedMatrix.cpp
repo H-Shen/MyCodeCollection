@@ -22,13 +22,15 @@ public:
     constexpr Mat() noexcept = default;
 
     // Element access
-    [[nodiscard]] constexpr T *operator[](std::size_t i) noexcept {
-        assert(i < R);
+    [[nodiscard]] constexpr T *operator[](std::size_t i) {
+        if (i >= R)
+            throw std::out_of_range("Mat::operator[]: row index out of range");
         return A[i].data();
     }
 
-    [[nodiscard]] constexpr const T *operator[](std::size_t i) const noexcept {
-        assert(i < R);
+    [[nodiscard]] constexpr const T *operator[](std::size_t i) const {
+        if (i >= R)
+            throw std::out_of_range("Mat::operator[]: row index out of range");
         return A[i].data();
     }
 
