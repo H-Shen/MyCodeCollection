@@ -3869,6 +3869,22 @@ int rev_g(int g) {
     return n;
 }
 
+/**
+ * An algorithm to calculate the number of factor p in factorial(n)
+ * Pre-condition: p is a factor of factorial(n)
+ * @return the number of factor p in n!
+ */
+inline static
+ll countOfAFactorInFactorial(ll n, ll p) {
+    ll result = 0;
+    while (n != 0) {
+        n /= p;
+        result += n;
+    }
+    return result;
+}
+
+
 // Kruskal重构树
 // https://leetcode.com/problems/checking-existence-of-edge-length-limited-paths-ii/
 // https://codeforces.com/blog/entry/85714
