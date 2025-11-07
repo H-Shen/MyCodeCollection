@@ -1,0 +1,687 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{fontspec}
+\newfontfamily\codefont{JetBrains Mono}
+
+\usepackage{expl3}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{hyperref}
+\usepackage{setspace}
+\usepackage{caption}
+\usepackage{fancyhdr}
+
+% --- Page style ---
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\texttt{From Shell to Binary}}
+\fancyhead[R]{\texttt{November 2025}}
+\fancyfoot[C]{\thepage}
+
+\setstretch{1.2}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  urlcolor=blue,
+  citecolor=black
+}
+
+% --- Code style ---
+\definecolor{lightgray}{rgb}{0.96,0.96,0.96}
+\definecolor{deepblue}{rgb}{0.13,0.13,0.73}
+\definecolor{deepred}{rgb}{0.6,0,0}
+\definecolor{deepgreen}{rgb}{0,0.45,0}
+\definecolor{darkgray}{rgb}{0.3,0.3,0.3}
+
+\lstset{
+  backgroundcolor=\color{lightgray},
+  basicstyle=\codefont\footnotesize,
+  frame=single,
+  rulecolor=\color{gray},
+  breaklines=true,
+  breakatwhitespace=true,
+  showstringspaces=false,
+  commentstyle=\color{deepgreen},
+  keywordstyle=\color{deepblue}\bfseries,
+  stringstyle=\color{deepred},
+  tabsize=4,
+  columns=fullflexible,
+  keepspaces=true
+}
+
+\lstdefinestyle{bash}{language=bash}
+\lstdefinestyle{go}{language=go}
+
+% --- Hex numbering ---
+\ExplSyntaxOn
+\newcommand{\hexnum}[1]{\int_to_Hex:n { #1 }}
+\newcommand{\hexsection}{\hexnum{\value{section}}}
+\ExplSyntaxOff
+
+\titleformat{\section}
+  {\normalfont\ttfamily\LARGE}
+  {\texttt{0x\hexsection}}
+  {1em}
+  {\bfseries}
+  []
+\titlespacing*{\section}{0pt}{1.2ex plus 1ex minus .2ex}{0.8ex}
+
+\title{\textbf{From Shell to Binary: Simple Local Field Encryption for Notion Workflows}}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{0x0 Context: Job Systems, Notion, and the Problem of Trust}
+
+While managing a job-hunting pipeline within Notion---tracking companies, portals, and credential states---the same flaw repeated itself:  
+each platform demanded yet another isolated login.  
+Passwords multiplied faster than interviews, and the ``management'' problem outgrew any browser extension.
+
+Notion became the data hub, but also the weakest link:  
+its tables stored plaintext, its encryption model was closed-source,  
+and ``zero-trust'' meant trusting someone else's zero.  
+
+The requirement was simple but absolute:  
+store credentials inside Notion, but never in plaintext.  
+Encryption had to happen locally, offline, reversible, and reproducible.
+
+\section*{0x1 First Attempt: The Shell Script Era}
+
+A Bash prototype looked elegant:
+
+\begin{lstlisting}[style=bash,caption={Initial Bash prototype}]
+#!/bin/bash
+gpg --armor --encrypt -r "$1" <<< "$2"
+\end{lstlisting}
+
+It worked---until whitespace appeared.  
+Different shells (\texttt{bash}, \texttt{zsh}, \texttt{fish}) interpreted quoting rules differently; clipboard utilities truncated output streams; newline handling corrupted armored blocks.  
+Debugging became ritual suffering.
+
+Worse, portability vanished across systems:
+\begin{itemize}
+  \item macOS vs Linux: inconsistent redirection semantics;
+  \item Dependency drift: \texttt{gpg} vs \texttt{gpg2};
+  \item Shell injection risks under weak sanitization.
+\end{itemize}
+
+The design violated the first principle of secure tooling:  
+\textbf{determinism over convenience.}  
+Thus the migration---to a compiled, reproducible binary---became inevitable.
+
+\section*{0x2 Why Go: Static Control and Binary Hygiene}
+
+Go was chosen for its operational determinism rather than speed:
+\begin{itemize}
+  \item Portable, statically linked, zero-runtime dependency;
+  \item Context-based timeout control;
+  \item Simple cross-compilation for Darwin, Linux, Windows;
+  \item Binary hygiene: trimpath, no build ID, stripped symbols;
+  \item Excellent subprocess and I/O support.
+\end{itemize}
+
+The tool had to behave identically across environments---  
+no shell aliases, no environment inheritance, no hidden state.  
+It would operate like a utility: precise, deterministic, and quiet.
+
+\section*{0x3 Clean Build Chain}
+
+\begin{lstlisting}[style=bash,caption={Static release build on macOS}]
+env GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 \
+  go build -ldflags="-s -w -buildid=" -trimpath -o notioncrypt notioncrypt.go
+\end{lstlisting}
+
+\begin{lstlisting}[style=bash,caption={Static release build on Linux}]
+env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+  go build -ldflags="-s -w -buildid=" -trimpath -o notioncrypt notioncrypt.go
+\end{lstlisting}
+
+\begin{lstlisting}[style=bash,caption={Static release build on Windows}]
+env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+  go build -ldflags="-s -w -buildid=" -trimpath -o notioncrypt.exe notioncrypt.go
+\end{lstlisting}
+
+Flags removed paths and symbols, ensuring auditability.
+
+\begin{lstlisting}[style=bash]
+strings notioncrypt | grep -E "Users|src|go:"
+\end{lstlisting}
+
+No leakage, no traces, no excuses.
+
+\section*{0x4 The UPX Trap}
+
+Compression was tested once---then never again:
+
+\begin{lstlisting}[style=bash]
+upx --best --lzma notioncrypt
+./notioncrypt --help
+# -> trace trap
+\end{lstlisting}
+
+At first glance it looked like a bad compression build,  
+but the truth was more architectural.
+
+To verify, a debugging session was started:
+
+\begin{lstlisting}[style=bash,caption={Debugging the trap with LLDB}]
+lldb ./notioncrypt
+(lldb) target create "./notioncrypt"
+(lldb) run --help
+Process 32809 launched: '/home/scripts/notioncrypt' (x86_64)
+Process 32809 stopped
+* thread #1, stop reason = EXC_BREAKPOINT (code=EXC_I386_BPT, subcode=0x0)
+    frame #0: 0x00000000010c9301 notioncrypt
+->  0x10c9301: callq  0x10c95c0
+    0x10c9306: pushq  %rbp
+    0x10c9307: pushq  %rbx
+    0x10c9308: pushq  %rcx
+\end{lstlisting}
+
+\texttt{lldb} confirmed: \texttt{EXC\_BREAKPOINT}.  
+macOS AMFI blocked self-decompression memory.  
+The conclusion was instant: anti-tamper protections can turn inward.  
+UPX saved kilobytes but cost predictability.  
+Lesson: \textit{smaller is not safer.}
+
+\section*{0x5 GPG as Subprocess, Not Library}
+
+Instead of embedding OpenPGP libraries, GPG was treated as an external primitive.  
+Advantages:
+\begin{itemize}
+  \item Full compatibility with system keyrings;
+  \item Avoids static crypto dependencies;
+  \item Predictable I/O and isolated state.
+\end{itemize}
+
+Neutral test keys---\texttt{anonymous <anonymous@local>}---were generated.  
+RSA-4096, no passphrase, local scope only.
+
+In the hardened version, the binary never imports or writes keys into the keyring itself;  
+key management stays in \texttt{gpg(1)} land (\texttt{gpg --import}), and the helper remains stateless glue.
+
+\section*{0x6 Determinism and Error Design}
+
+Failure modes are internally categorized but exposed to the user as only three coarse exit codes:
+
+\begin{itemize}
+  \item \textbf{0} --- success;
+  \item \textbf{1} --- usage or input errors (arguments, limits, empty streams);
+  \item \textbf{2} --- GPG-related failures (missing binary, encryption/decryption errors, timeouts).
+\end{itemize}
+
+A single error type carries both human-readable messages and exit codes,  
+so automation does not depend on brittle substring matching inside error strings.  
+
+Internally, finer-grained validation errors (format, length, I/O) are all mapped to \texttt{ExitUsage}, simplifying scripting behavior.
+
+By aligning exit codes to deterministic categories, the binary became composable within CI pipelines and shell automation---no silent failures, no undefined states.
+
+\section*{0x7 Practical Workflow}
+
+With the hardened interface, plaintext never needs to live in \texttt{argv}.  
+The only supported mode for plaintext input is \texttt{stdin}; armored ciphertext always goes to \texttt{stdout}.
+
+\begin{lstlisting}[style=bash,caption={Encrypt to clipboard (recommended)}]
+printf 'hunter2' | ./notioncrypt -e 3F1BB7201ADC1B56ED47D8A39E49C9D917A0CFFC | pbcopy
+\end{lstlisting}
+
+Decryption also stays strictly stream-based, with an optional key hint for multi-key setups:
+
+\begin{lstlisting}[style=bash,caption={Decrypt from clipboard (automatic key selection)}]
+pbpaste | ./notioncrypt -d # -> hunter2
+\end{lstlisting}
+
+\begin{lstlisting}[style=bash,caption={Decrypt with an explicit secret key hint}]
+pbpaste | ./notioncrypt -d 3F1BB7201ADC1B56ED47D8A39E49C9D917A0CFFC # -> hunter2
+\end{lstlisting}
+
+When a key ID is provided, GPG is nudged with \texttt{--try-secret-key} to prefer the corresponding secret key.  
+Without it, GPG falls back to its normal key selection logic.
+
+Offline, stateless, reversible---clipboard as transport, Notion as inert storage.
+
+\section*{0x8 Reflection: Systems, Attack Surfaces, and Agency}
+
+The evolution from Bash to Go to GPG subprocess mirrors a larger truth:  
+modern SaaS erodes user control through abstraction.  
+By building local encryption with no telemetry, no auth, and no API keys, one reclaims a fragment of computational agency.  
+
+This helper does not defend against a compromised endpoint or a stolen GPG keyring;  
+it assumes the local machine is trusted and focuses purely on keeping Notion's database blind to the actual secrets it stores.
+
+\medskip
+\textit{This binary began as convenience; it ended as philosophy.}
+
+\begin{flushright}
+November 5, 2025\\
+Prince George, BC
+\end{flushright}
+
+\section*{0x9 Interface Hardening and Revisions}
+
+The final iteration introduced several interface-level changes to better match the security model:
+
+\begin{itemize}
+  \item \textbf{Stdout/stdin only:} encryption now \emph{always} reads plaintext from \texttt{stdin} (\texttt{notioncrypt -e <key>}). There is no flag to pass secrets via \texttt{argv}, avoiding exposure in process listings and shell history.
+  \item \textbf{Keyring-driven decryption with optional hints:} decryption reads ciphertext from \texttt{stdin} and relies on the existing GPG keyring. An optional key ID argument nudges GPG via \texttt{--try-secret-key}, making multi-key setups deterministic without ever importing new keys on behalf of the user.
+  \item \textbf{No implicit imports:} the helper does not import key files or modify the user's keyring. Keys are added with \texttt{gpg --import}, keeping key management clearly separated from field encryption.
+  \item \textbf{Single typed error with coarse exit codes:} one error type carries both human-readable messages and one of three exit codes (success, usage, GPG failure), avoiding brittle substring matching while keeping shell integration simple. Internally, finer-grained validation errors (format, length, I/O) are all mapped to \texttt{ExitUsage}, simplifying scripting behavior.
+  \item \textbf{Portable GPG discovery:} \texttt{gpg} is located via \texttt{exec.LookPath} without over-eager permission checks, fixing subtle failures on non-POSIX platforms while preserving the ``no magic dependencies'' property.
+  \item \textbf{Byte-agnostic payloads:} plaintext is treated as an opaque byte stream; the tool does not enforce UTF-8 or forbid null bytes. The only constraints are size limits and non-emptiness, matching GPG's ability to encrypt arbitrary data.
+\end{itemize}
+
+These changes make the binary more honest about its behavior:  
+no hidden keyring writes, no accidental exposure of secrets in process listings,  
+and no ambiguity about how failures propagate into calling scripts.
+
+\appendix
+\section*{Appendix A: Complete Go Implementation}
+
+Below is the hardened Go implementation---clean, stateless, and fully auditable.
+
+\lstset{frame=none}
+\begin{lstlisting}[style=go]
+package main
+
+// Build instructions for different platforms:
+//
+// macOS (Darwin) amd64:
+//   env GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 \
+//     go build -ldflags="-s -w -buildid=" -trimpath -o notioncrypt notioncrypt.go
+//
+// Linux amd64:
+//   env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+//     go build -ldflags="-s -w -buildid=" -trimpath -o notioncrypt notioncrypt.go
+//
+// Windows amd64:
+//   env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+//     go build -ldflags="-s -w -buildid=" -trimpath -o notioncrypt.exe notioncrypt.go
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+// Exit codes returned by the program to indicate different error conditions.
+const (
+	ExitOK = iota // Operation completed successfully
+	ExitUsage     // Invalid usage or input
+	ExitGPGError  // GPG-related failure (missing gpg, encrypt/decrypt error)
+)
+
+const (
+	maxPlaintextBytes  = 8 * 1024         // Maximum plaintext size: 8 KB
+	maxCiphertextBytes = 64 * 1024        // Maximum ciphertext size: 64 KB
+	maxKeyLength       = 1024             // Maximum length for key ID
+	gpgTimeout         = 10 * time.Second // Timeout for GPG operations
+)
+
+// ToolError represents an application error with an associated exit code.
+type ToolError struct {
+	Message string // High-level message
+	Err     error  // Underlying error, if any
+	Code    int    // Exit code
+}
+
+func (e *ToolError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("%s: %v", e.Message, e.Err)
+	}
+	return e.Message
+}
+
+func (e *ToolError) Unwrap() error {
+	return e.Err
+}
+
+func main() {
+	encMode := flag.Bool("e", false, "encrypt mode (reads plaintext from stdin)")
+	decMode := flag.Bool("d", false, "decrypt mode (reads ciphertext from stdin)")
+	help := flag.Bool("help", false, "show help message")
+	flag.Parse()
+
+	if *help {
+		printUsage()
+		os.Exit(ExitOK)
+	}
+
+	if err := run(*encMode, *decMode, flag.Args()); err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(getExitCode(err))
+	}
+}
+
+// run contains the main application logic, separated for testability.
+func run(encMode, decMode bool, args []string) error {
+	// Ensure exactly one mode is specified.
+	if (encMode && decMode) || (!encMode && !decMode) {
+		printUsage()
+		return &ToolError{
+			Message: "must specify exactly one of -e or -d",
+			Code:    ExitUsage,
+		}
+	}
+
+	// Locate the GPG executable.
+	gpg, err := findGPG()
+	if err != nil {
+		return err
+	}
+
+	// Route to the appropriate mode handler.
+	if encMode {
+		return runEncrypt(gpg, args)
+	}
+	return runDecrypt(gpg, args)
+}
+
+// runEncrypt handles encryption mode.
+// Usage: notioncrypt -e <public_key>  (plaintext from stdin)
+func runEncrypt(gpg string, args []string) error {
+	if len(args) != 1 {
+		printUsage()
+		return &ToolError{
+			Message: "encrypt mode requires exactly 1 argument: <public_key>",
+			Code:    ExitUsage,
+		}
+	}
+
+	key := args[0]
+	if err := validateKey(key); err != nil {
+		return err
+	}
+
+	// Read plaintext from stdin with size limit (+1 to detect overflow).
+	data, err := io.ReadAll(io.LimitReader(os.Stdin, maxPlaintextBytes+1))
+	if err != nil {
+		return &ToolError{
+			Message: "failed to read plaintext from stdin",
+			Err:     err,
+			Code:    ExitUsage,
+		}
+	}
+
+	if err := validatePlaintextBytes(data); err != nil {
+		return err
+	}
+
+	return encrypt(gpg, key, data)
+}
+
+// runDecrypt handles decryption mode:
+//   notioncrypt -d [<private_key>]
+// Reads ciphertext from stdin; optionally prefers a specific secret key.
+func runDecrypt(gpg string, args []string) error {
+	var keyID string
+	if len(args) > 1 {
+		printUsage()
+		return &ToolError{
+			Message: "decrypt mode accepts at most 1 argument: optional <private_key>",
+			Code:    ExitUsage,
+		}
+	}
+	if len(args) == 1 {
+		keyID = args[0]
+		if err := validateKey(keyID); err != nil {
+			return err
+		}
+	}
+
+	// Read ciphertext from stdin with size limit (+1 to detect overflow).
+	data, err := io.ReadAll(io.LimitReader(os.Stdin, maxCiphertextBytes+1))
+	if err != nil {
+		return &ToolError{
+			Message: "failed to read ciphertext from stdin",
+			Err:     err,
+			Code:    ExitUsage,
+		}
+	}
+
+	// Verify we didn't exceed the maximum size.
+	if len(data) > maxCiphertextBytes {
+		return &ToolError{
+			Message: fmt.Sprintf("ciphertext exceeds maximum size of %d bytes", maxCiphertextBytes),
+			Code:    ExitUsage,
+		}
+	}
+
+	// Ensure we received some data to decrypt.
+	if len(data) == 0 {
+		return &ToolError{
+			Message: "no ciphertext provided on stdin",
+			Code:    ExitUsage,
+		}
+	}
+
+	// Perform decryption and write plaintext to stdout.
+	return decrypt(gpg, keyID, data)
+}
+
+// validateKey performs minimal validation for a GPG key ID.
+// It only enforces non-empty, reasonable length, and no newlines.
+func validateKey(key string) error {
+	if len(key) == 0 {
+		return &ToolError{
+			Message: "validation failed for key: cannot be empty",
+			Code:    ExitUsage,
+		}
+	}
+
+	if len(key) > maxKeyLength {
+		return &ToolError{
+			Message: fmt.Sprintf("validation failed for key: exceeds maximum length of %d bytes", maxKeyLength),
+			Code:    ExitUsage,
+		}
+	}
+
+	// Avoid embedded newlines which can make logging and diagnostics confusing.
+	if strings.ContainsAny(key, "\n\r") {
+		return &ToolError{
+			Message: "validation failed for key: must not contain newlines",
+			Code:    ExitUsage,
+		}
+	}
+
+	return nil
+}
+
+// validatePlaintextBytes validates plaintext provided as raw bytes.
+// It enforces only non-emptiness and a maximum size limit.
+func validatePlaintextBytes(plaintext []byte) error {
+	if len(plaintext) == 0 {
+		return &ToolError{
+			Message: "validation failed for plaintext: cannot be empty",
+			Code:    ExitUsage,
+		}
+	}
+
+	if len(plaintext) > maxPlaintextBytes {
+		return &ToolError{
+			Message: fmt.Sprintf("validation failed for plaintext: exceeds maximum size of %d bytes", maxPlaintextBytes),
+			Code:    ExitUsage,
+		}
+	}
+
+	return nil
+}
+
+// getExitCode maps errors to appropriate exit codes for shell scripting.
+func getExitCode(err error) int {
+	if err == nil {
+		return ExitOK
+	}
+
+	var te *ToolError
+	if errors.As(err, &te) {
+		return te.Code
+	}
+
+	// Default to usage error for unknown error types.
+	return ExitUsage
+}
+
+// printUsage displays comprehensive usage information.
+func printUsage() {
+	fmt.Println(`notioncrypt - lightweight GPG-based encryption helper
+
+Usage:
+  # Encrypt: read plaintext from stdin, write ciphertext to stdout
+  notioncrypt -e <public_key>
+      Encrypts plaintext from stdin with a GPG public key ID.
+      Output is ASCII-armored and written to stdout.
+
+  # Decrypt: read ciphertext from stdin, write plaintext to stdout
+  notioncrypt -d [<private_key>]
+      Decrypts ciphertext from stdin using the existing GPG keyring.
+      If <private_key> is provided, GPG will preferentially try that secret key.
+      Output plaintext is written to stdout.
+
+Options:
+  -e        Encrypt mode. Reads plaintext from stdin.
+  -d        Decrypt mode. Reads ciphertext from stdin; optionally takes a key ID.
+  --help    Show this help message.
+
+Arguments:
+  <public_key>   GPG key ID for encryption. The public key must already exist in the user's keyring.
+  <private_key>  Optional secret key ID to prefer during decryption.
+
+Format rules:
+  1. Plaintext is read as raw bytes from stdin.
+  2. Plaintext must not be empty.
+  3. Maximum plaintext size: 8 KB.
+  4. Maximum ciphertext size: 64 KB.
+  5. Keys must not be empty, excessively long, or contain newlines.
+
+Examples:
+  # Encrypt with key ID and copy to clipboard (recommended)
+  printf 'hunter2' | notioncrypt -e mykey | pbcopy
+  
+  # Decrypt from clipboard, let GPG choose the key
+  pbpaste | notioncrypt -d
+
+  # Decrypt from clipboard, prefer a specific secret key
+  pbpaste | notioncrypt -d mykey
+
+Error codes:
+  0  Success
+  1  Invalid usage or input
+  2  GPG-related failure (missing gpg, encryption or decryption error)
+
+Common issues:
+  - "gpg: decryption failed: No secret key"
+      → Import your secret key:  gpg --import secret.asc
+  
+  - "gpg: <KEYID>: skipped: No public key"
+      → Import the public key:   gpg --import public.asc
+  
+  - "no ciphertext provided on stdin"
+      → Pipe input explicitly:   echo 'text' | notioncrypt -e KEYID
+`)
+}
+
+// findGPG locates the GPG executable in PATH.
+// Tries both "gpg" and "gpg2".
+func findGPG() (string, error) {
+	for _, name := range []string{"gpg", "gpg2"} {
+		path, err := exec.LookPath(name)
+		if err == nil && path != "" {
+			return path, nil
+		}
+	}
+	return "", &ToolError{
+		Message: "gpg executable not found in PATH (tried: gpg, gpg2)",
+		Code:    ExitGPGError,
+	}
+}
+
+// encrypt encrypts plaintext using GPG with the specified public key ID.
+// Output is ASCII-armored and written to stdout.
+func encrypt(gpg, recipient string, plaintext []byte) error {
+	// Preconditions are enforced by callers:
+	//   - gpg is a valid executable path
+	//   - recipient is a validated key ID
+	//   - plaintext has passed size checks
+
+	ctx, cancel := context.WithTimeout(context.Background(), gpgTimeout)
+	defer cancel()
+
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, gpg,
+		"--armor", "--encrypt", "--recipient", recipient,
+	)
+	cmd.Stdin = bytes.NewReader(plaintext)
+	cmd.Stdout = os.Stdout // Write encrypted output to stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return &ToolError{
+				Message: fmt.Sprintf("encrypt failed: gpg timed out after %v", gpgTimeout),
+				Err:     ctx.Err(),
+				Code:    ExitGPGError,
+			}
+		}
+		return &ToolError{
+			Message: fmt.Sprintf("encrypt failed (stderr: %s)", strings.TrimSpace(stderr.String())),
+			Err:     err,
+			Code:    ExitGPGError,
+		}
+	}
+
+	return nil
+}
+
+// decrypt decrypts ciphertext using GPG and writes plaintext to stdout.
+// If keyID is non-empty, GPG will preferentially try that secret key.
+func decrypt(gpg, keyID string, data []byte) error {
+	// Preconditions are enforced by callers:
+	//   - gpg is a valid executable path
+	//   - data is non-empty and within size limits
+	//   - keyID, if present, has passed validateKey
+
+	args := []string{"--quiet", "--batch", "--yes"}
+	if keyID != "" {
+		args = append(args, "--try-secret-key", keyID)
+	}
+	args = append(args, "--decrypt")
+
+	ctx, cancel := context.WithTimeout(context.Background(), gpgTimeout)
+	defer cancel()
+
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, gpg, args...)
+	cmd.Stdin = bytes.NewReader(data)
+	cmd.Stdout = os.Stdout // Write decrypted output to stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return &ToolError{
+				Message: fmt.Sprintf("decrypt failed: gpg timed out after %v", gpgTimeout),
+				Err:     ctx.Err(),
+				Code:    ExitGPGError,
+			}
+		}
+		return &ToolError{
+			Message: fmt.Sprintf("decrypt failed (stderr: %s)", strings.TrimSpace(stderr.String())),
+			Err:     err,
+			Code:    ExitGPGError,
+		}
+	}
+
+	return nil
+}
+\end{lstlisting}
+\end{document}
