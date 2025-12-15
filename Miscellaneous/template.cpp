@@ -4605,6 +4605,26 @@ void manacher_usage() {
     cout << result << '\n';
 }
 
+/**
+ * Checks if a string represents a valid integer
+ * Rules:
+ * - Leading zeros are not allowed (except for "0")
+ * - Plus sign (+) is not allowed
+ * - Minus sign (-) is allowed for negative numbers
+ * - Empty strings and non-numeric characters are invalid
+ *
+ * Valid examples: "0", "123", "-456"
+ * Invalid examples: "01", "+123", "-0", "12.3", "abc"
+ *
+ * @param s The string to validate
+ * @return true if s represents a valid integer, false otherwise
+ */
+bool isInteger(const std::string& s) {
+    // Use static to avoid recompiling regex on each call
+    static const std::regex integerPattern(R"(^(-?[1-9]\d*|0)$)");
+    return std::regex_match(s, integerPattern);
+}
+
 int main() {
 
     //freopen("in", "r", stdin);
